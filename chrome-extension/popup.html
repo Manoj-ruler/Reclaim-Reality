@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 350px;
+      min-height: 400px;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    
+    .header {
+      padding: 20px;
+      text-align: center;
+      background: rgba(0, 0, 0, 0.2);
+    }
+    
+    .logo {
+      font-size: 24px;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+    
+    .tagline {
+      font-size: 12px;
+      opacity: 0.8;
+    }
+    
+    .content {
+      padding: 20px;
+    }
+    
+    .scan-button {
+      width: 100%;
+      padding: 15px;
+      background: #8b5cf6;
+      border: none;
+      border-radius: 8px;
+      color: white;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-bottom: 15px;
+    }
+    
+    .scan-button:hover {
+      background: #7c3aed;
+      transform: translateY(-1px);
+    }
+    
+    .scan-button:disabled {
+      background: #6b7280;
+      cursor: not-allowed;
+      transform: none;
+    }
+    
+    .status {
+      padding: 12px;
+      border-radius: 6px;
+      margin-bottom: 15px;
+      font-size: 14px;
+      text-align: center;
+    }
+    
+    .status.likely-ai {
+      background: rgba(239, 68, 68, 0.2);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    
+    .status.likely-human {
+      background: rgba(34, 197, 94, 0.2);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+    
+    .status.uncertain {
+      background: rgba(251, 191, 36, 0.2);
+      border: 1px solid rgba(251, 191, 36, 0.3);
+    }
+    
+    .confidence {
+      font-size: 12px;
+      opacity: 0.9;
+      margin-top: 5px;
+    }
+    
+    .details {
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 6px;
+      padding: 12px;
+      font-size: 12px;
+      margin-bottom: 15px;
+    }
+    
+    .details h4 {
+      margin: 0 0 8px 0;
+      font-size: 13px;
+      color: #e5e7eb;
+    }
+    
+    .details ul {
+      margin: 0;
+      padding-left: 16px;
+    }
+    
+    .details li {
+      margin-bottom: 4px;
+      color: #d1d5db;
+    }
+    
+    .loading {
+      text-align: center;
+      padding: 20px;
+    }
+    
+    .spinner {
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top: 2px solid white;
+      width: 20px;
+      height: 20px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 10px;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .error {
+      background: rgba(239, 68, 68, 0.2);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 14px;
+      text-align: center;
+    }
+    
+    .footer {
+      padding: 15px 20px;
+      text-align: center;
+      font-size: 11px;
+      opacity: 0.7;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">🛡️ Reclaim Reality</div>
+    <div class="tagline">AI Content Detection</div>
+  </div>
+  
+  <div class="content">
+    <button id="scanButton" class="scan-button">
+      🔍 Scan This Page
+    </button>
+    
+    <div id="loading" class="loading" style="display: none;">
+      <div class="spinner"></div>
+      <div>Analyzing content...</div>
+    </div>
+    
+    <div id="results" style="display: none;">
+      <div id="status" class="status"></div>
+      <div id="details" class="details"></div>
+    </div>
+    
+    <div id="error" class="error" style="display: none;"></div>
+  </div>
+  
+  <div class="footer">
+    Protecting digital truth, one page at a time
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>
