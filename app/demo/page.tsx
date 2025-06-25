@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
@@ -17,9 +17,12 @@ import {
   Eye,
   Video,
   FileText,
-  ExternalLink,
   Zap,
-  TrendingUp,
+  Brain,
+  Cpu,
+  Newspaper,
+  Search,
+  Flag,
 } from "lucide-react"
 
 export default function EnhancedDemoPage() {
@@ -32,6 +35,15 @@ export default function EnhancedDemoPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [result, setResult] = useState<any>(null)
   const [error, setError] = useState<string>("")
+  const [wordCount, setWordCount] = useState(0)
+  const [isRealTimeAnalyzing, setIsRealTimeAnalyzing] = useState(false)
+  const [realTimeResult, setRealTimeResult] = useState<any>(null)
+  const [analysisBreakdown, setAnalysisBreakdown] = useState({
+    ai_generated: 0,
+    ai_refined: 0,
+    human_refined: 0,
+    human_written: 0,
+  })
 
   // Prevent hydration issues
   useEffect(() => {
@@ -79,10 +91,69 @@ export default function EnhancedDemoPage() {
     }
   }
 
+  // AI-powered real-time analysis
+  const analyzeRealTimeWithAI = useCallback(
+    debounce(async (textContent: string) => {
+      if (!textContent || textContent.trim().length < 40) {
+        setRealTimeResult(null)
+        setAnalysisBreakdown({ ai_generated: 0, ai_refined: 0, human_refined: 0, human_written: 0 })
+        return
+      }
+
+      setIsRealTimeAnalyzing(true)
+
+      try {
+        console.log("🤖 Calling enhanced analysis...")
+
+        const response = await fetch("/api/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: textContent,
+            contentType: "text",
+            realTime: true,
+          }),
+        })
+
+        if (response.ok) {
+          const result = await response.json()
+          if (!result.error) {
+            console.log("✅ Enhanced analysis result:", result)
+            setRealTimeResult(result)
+            setAnalysisBreakdown(
+              result.breakdown || { ai_generated: 0, ai_refined: 0, human_refined: 0, human_written: 0 },
+            )
+          }
+        } else {
+          console.error("Enhanced analysis API error:", response.status)
+        }
+      } catch (error) {
+        console.error("Real-time enhanced analysis failed:", error)
+        // Silently fail for real-time analysis
+      } finally {
+        setIsRealTimeAnalyzing(false)
+      }
+    }, 1500),
+    [],
+  )
+
+  // Debounce utility function
+  function debounce(func: Function, wait: number) {
+    let timeout: NodeJS.Timeout
+    return function executedFunction(...args: any[]) {
+      const later = () => {
+        clearTimeout(timeout)
+        func(...args)
+      }
+      clearTimeout(timeout)
+      timeout = setTimeout(later, wait)
+    }
+  }
+
   const getStatusIcon = (status: string) => {
     switch (status) {
       case "ai_generated":
-        return <AlertTriangle className="w-5 h-5 text-orange-500" />
+        return <Cpu className="w-5 h-5 text-orange-500" />
       case "manipulated":
         return <AlertTriangle className="w-5 h-5 text-red-500" />
       case "hyperreal":
@@ -92,19 +163,40 @@ export default function EnhancedDemoPage() {
       case "uncertain":
         return <HelpCircle className="w-5 h-5 text-yellow-500" />
       default:
-        return <HelpCircle className="w-5 h-5 text-gray-500" />
+        return <Brain className="w-5 h-5 text-gray-500" />
+    }
+  }
+
+  const getNewsStatusIcon = (status: string) => {
+    switch (status) {
+      case "real":
+        return <CheckCircle className="w-5 h-5 text-green-500" />
+      case "fake":
+        return <AlertTriangle className="w-5 h-5 text-red-500" />
+      case "misleading":
+        return <Flag className="w-5 h-5 text-orange-500" />
+      case "satire":
+        return <Zap className="w-5 h-5 text-purple-500" />
+      case "uncertain":
+        return <HelpCircle className="w-5 h-5 text-yellow-500" />
+      default:
+        return <Newspaper className="w-5 h-5 text-gray-500" />
     }
   }
 
   const getStatusColor = (status: string) => {
     switch (status) {
       case "ai_generated":
+      case "fake":
+      case "misleading":
         return "bg-orange-500/20 text-orange-300 border-orange-500/30"
       case "manipulated":
         return "bg-red-500/20 text-red-300 border-red-500/30"
       case "hyperreal":
+      case "satire":
         return "bg-purple-500/20 text-purple-300 border-purple-500/30"
       case "authentic":
+      case "real":
         return "bg-green-500/20 text-green-300 border-green-500/30"
       case "uncertain":
         return "bg-yellow-500/20 text-yellow-300 border-yellow-500/30"
@@ -122,9 +214,17 @@ export default function EnhancedDemoPage() {
       case "hyperreal":
         return "Hyperreal"
       case "authentic":
-        return "Authentic"
+        return "Human Written"
       case "uncertain":
         return "Uncertain"
+      case "real":
+        return "Real News"
+      case "fake":
+        return "Fake News"
+      case "misleading":
+        return "Misleading"
+      case "satire":
+        return "Satire"
       default:
         return "Unknown"
     }
@@ -153,9 +253,9 @@ export default function EnhancedDemoPage() {
             <Shield className="h-12 w-12 text-purple-400" />
             <h1 className="text-4xl font-bold text-white">Reclaim Reality</h1>
           </div>
-          <p className="text-xl text-gray-300">Multi-Modal AI Detection & Credibility Analysis</p>
+          <p className="text-xl text-gray-300">AI Detection & News Verification System</p>
           <Badge className="mt-4 bg-purple-500/20 text-purple-300 border-purple-500/30">
-            🚀 Detects Text, Images & Videos - Real-time Analysis
+            🤖 AI Detection + 📰 News Verification - Real-time Analysis
           </Badge>
         </div>
 
@@ -172,7 +272,8 @@ export default function EnhancedDemoPage() {
           <Card className="bg-white/5 border-white/10 backdrop-blur-xl">
             <CardHeader>
               <CardTitle className="text-white flex items-center space-x-2">
-                <span>🔍 Content Analysis</span>
+                <Brain className="w-5 h-5" />
+                <span>Enhanced Content Analysis</span>
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -195,9 +296,22 @@ export default function EnhancedDemoPage() {
                 <TabsContent value="text" className="space-y-4">
                   <Textarea
                     key="text-input"
-                    placeholder="Paste news articles, social media posts, or any text content..."
+                    placeholder="Paste news articles, social media posts, or any text content for AI detection and news verification..."
                     value={text}
-                    onChange={(e) => setText(e.target.value)}
+                    onChange={(e) => {
+                      const newText = e.target.value
+                      setText(newText)
+
+                      // Count words
+                      const words = newText
+                        .trim()
+                        .split(/\s+/)
+                        .filter((word) => word.length > 0)
+                      setWordCount(words.length)
+
+                      // Trigger enhanced real-time analysis
+                      analyzeRealTimeWithAI(newText)
+                    }}
                     className="min-h-[200px] bg-white/5 border-white/20 text-white placeholder:text-gray-400"
                   />
                 </TabsContent>
@@ -231,7 +345,7 @@ export default function EnhancedDemoPage() {
 
               <Input
                 key="source-input"
-                placeholder="Source URL (optional) - for credibility analysis"
+                placeholder="Source URL (optional) - for enhanced credibility analysis"
                 value={sourceUrl}
                 onChange={(e) => setSourceUrl(e.target.value)}
                 className="bg-white/5 border-white/20 text-white placeholder:text-gray-400"
@@ -251,7 +365,7 @@ export default function EnhancedDemoPage() {
                   ) : (
                     <>
                       <Shield className="w-4 h-4 mr-2" />
-                      Analyze Content
+                      Full Analysis
                     </>
                   )}
                 </Button>
@@ -264,6 +378,8 @@ export default function EnhancedDemoPage() {
                     setSourceUrl("")
                     setResult(null)
                     setError("")
+                    setRealTimeResult(null)
+                    setAnalysisBreakdown({ ai_generated: 0, ai_refined: 0, human_refined: 0, human_written: 0 })
                   }}
                   variant="outline"
                   className="border-white/20 text-white hover:bg-white/10"
@@ -276,7 +392,7 @@ export default function EnhancedDemoPage() {
               <div className="space-y-2">
                 <p className="text-sm text-gray-400">Try these samples:</p>
                 <div className="flex flex-wrap gap-2">
-                  {["AI-generated news", "Human blog post", "Social media"].map((sample, index) => (
+                  {["AI-generated news", "Real news article", "Fake news example"].map((sample, index) => (
                     <Button
                       key={`sample-${index}`}
                       size="sm"
@@ -296,96 +412,226 @@ export default function EnhancedDemoPage() {
           <Card className="bg-white/5 border-white/10 backdrop-blur-xl">
             <CardHeader>
               <CardTitle className="text-white flex items-center space-x-2">
-                <span>📊 Analysis Results</span>
+                <Search className="w-5 h-5" />
+                <span>Analysis Results</span>
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {!result ? (
+              {activeTab === "text" && text ? (
+                <div className="space-y-6">
+                  {/* Word Count & Status */}
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-400">
+                      {wordCount} words {wordCount < 40 && "(minimum 40 words required)"}
+                    </span>
+                    {isRealTimeAnalyzing && (
+                      <span className="text-purple-400 flex items-center">
+                        <Brain className="w-3 h-3 mr-1 animate-pulse" />
+                        Analyzing...
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Enhanced Analysis Results */}
+                  {wordCount >= 40 && realTimeResult && (
+                    <div className="space-y-6">
+                      {/* News Detection Alert */}
+                      {realTimeResult.is_news_content && (
+                        <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
+                          <div className="flex items-center space-x-2 mb-2">
+                            <Newspaper className="w-4 h-4 text-blue-400" />
+                            <span className="text-blue-300 font-semibold">News Content Detected</span>
+                          </div>
+                          <p className="text-blue-200 text-sm">
+                            Performing enhanced fact-checking and credibility analysis...
+                          </p>
+                        </div>
+                      )}
+
+                      {/* AI Detection Results */}
+                      <div className="space-y-4">
+                        <h4 className="text-white font-semibold flex items-center">
+                          <Brain className="w-4 h-4 mr-2" />
+                          AI Detection Analysis
+                        </h4>
+
+                        {/* AI Generated */}
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center">
+                            <span className="text-orange-300 text-sm flex items-center">
+                              <div className="w-3 h-3 bg-orange-500 rounded-full mr-2"></div>
+                              AI-generated
+                            </span>
+                            <span className="text-orange-300 font-semibold">{analysisBreakdown.ai_generated}%</span>
+                          </div>
+                          <Progress value={analysisBreakdown.ai_generated} className="h-2 bg-gray-700">
+                            <div
+                              className="h-full bg-orange-500 rounded-full transition-all duration-700"
+                              style={{ width: `${analysisBreakdown.ai_generated}%` }}
+                            />
+                          </Progress>
+                        </div>
+
+                        {/* Other breakdown categories... */}
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center">
+                            <span className="text-yellow-300 text-sm flex items-center">
+                              <div className="w-3 h-3 bg-yellow-500 rounded-full mr-2"></div>
+                              AI-refined
+                            </span>
+                            <span className="text-yellow-300 font-semibold">{analysisBreakdown.ai_refined}%</span>
+                          </div>
+                          <Progress value={analysisBreakdown.ai_refined} className="h-2 bg-gray-700">
+                            <div
+                              className="h-full bg-yellow-500 rounded-full transition-all duration-700"
+                              style={{ width: `${analysisBreakdown.ai_refined}%` }}
+                            />
+                          </Progress>
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center">
+                            <span className="text-blue-300 text-sm flex items-center">
+                              <div className="w-3 h-3 bg-blue-500 rounded-full mr-2"></div>
+                              Human-refined
+                            </span>
+                            <span className="text-blue-300 font-semibold">{analysisBreakdown.human_refined}%</span>
+                          </div>
+                          <Progress value={analysisBreakdown.human_refined} className="h-2 bg-gray-700">
+                            <div
+                              className="h-full bg-blue-500 rounded-full transition-all duration-700"
+                              style={{ width: `${analysisBreakdown.human_refined}%` }}
+                            />
+                          </Progress>
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center">
+                            <span className="text-green-300 text-sm flex items-center">
+                              <div className="w-3 h-3 bg-green-500 rounded-full mr-2"></div>
+                              Human-written
+                            </span>
+                            <span className="text-green-300 font-semibold">{analysisBreakdown.human_written}%</span>
+                          </div>
+                          <Progress value={analysisBreakdown.human_written} className="h-2 bg-gray-700">
+                            <div
+                              className="h-full bg-green-500 rounded-full transition-all duration-700"
+                              style={{ width: `${analysisBreakdown.human_written}%` }}
+                            />
+                          </Progress>
+                        </div>
+
+                        {/* AI Assessment */}
+                        <div className={`p-4 rounded-lg border ${getStatusColor(realTimeResult.authenticity_status)}`}>
+                          <div className="flex items-center space-x-3 mb-2">
+                            {getStatusIcon(realTimeResult.authenticity_status)}
+                            <span className="font-semibold">{getStatusText(realTimeResult.authenticity_status)}</span>
+                          </div>
+                          <div className="text-sm opacity-90">AI Confidence: {realTimeResult.confidence}%</div>
+                        </div>
+                      </div>
+
+                      {/* News Verification Results */}
+                      {realTimeResult.is_news_content && realTimeResult.news_authenticity && (
+                        <div className="space-y-4">
+                          <h4 className="text-white font-semibold flex items-center">
+                            <Newspaper className="w-4 h-4 mr-2" />
+                            News Verification
+                          </h4>
+
+                          {/* News Credibility Score */}
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-center">
+                              <span className="text-blue-300 text-sm">News Credibility Score</span>
+                              <span className="text-blue-300 font-semibold">
+                                {realTimeResult.news_credibility_score}/100
+                              </span>
+                            </div>
+                            <Progress value={realTimeResult.news_credibility_score} className="h-2 bg-gray-700">
+                              <div
+                                className="h-full bg-blue-500 rounded-full transition-all duration-700"
+                                style={{ width: `${realTimeResult.news_credibility_score}%` }}
+                              />
+                            </Progress>
+                          </div>
+
+                          {/* News Status */}
+                          <div className={`p-4 rounded-lg border ${getStatusColor(realTimeResult.news_authenticity)}`}>
+                            <div className="flex items-center space-x-3 mb-2">
+                              {getNewsStatusIcon(realTimeResult.news_authenticity)}
+                              <span className="font-semibold">{getStatusText(realTimeResult.news_authenticity)}</span>
+                            </div>
+                            <div className="text-sm opacity-90">News Confidence: {realTimeResult.news_confidence}%</div>
+                          </div>
+
+                          {/* Fact Check Results */}
+                          {realTimeResult.fact_check_results && (
+                            <div className="space-y-3">
+                              {realTimeResult.fact_check_results.claims_verified?.length > 0 && (
+                                <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3">
+                                  <h5 className="text-green-300 font-semibold mb-2">✅ Verified Claims:</h5>
+                                  <ul className="text-green-200 text-sm space-y-1">
+                                    {realTimeResult.fact_check_results.claims_verified.map(
+                                      (claim: string, index: number) => (
+                                        <li key={index}>• {claim}</li>
+                                      ),
+                                    )}
+                                  </ul>
+                                </div>
+                              )}
+
+                              {realTimeResult.fact_check_results.red_flags?.length > 0 && (
+                                <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+                                  <h5 className="text-red-300 font-semibold mb-2">🚩 Red Flags:</h5>
+                                  <ul className="text-red-200 text-sm space-y-1">
+                                    {realTimeResult.fact_check_results.red_flags.map((flag: string, index: number) => (
+                                      <li key={index}>• {flag}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Research Summary */}
+                          {realTimeResult.research_summary && (
+                            <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-3">
+                              <h5 className="text-purple-300 font-semibold mb-2 flex items-center">
+                                <Search className="w-4 h-4 mr-2" />
+                                Research Summary:
+                              </h5>
+                              <p className="text-purple-200 text-sm">{realTimeResult.research_summary}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Overall Recommendation */}
+                      <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-4">
+                        <h4 className="text-purple-300 font-semibold mb-2">💡 Recommendation:</h4>
+                        <p className="text-purple-200 text-sm">{realTimeResult.suggested_action}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {wordCount < 40 && (
+                    <div className="text-center py-8 text-gray-400">
+                      <Brain className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                      <p>Add at least 40 words to begin enhanced analysis</p>
+                    </div>
+                  )}
+                </div>
+              ) : !result ? (
                 <div className="text-center py-12 text-gray-400">
                   <Shield className="w-16 h-16 mx-auto mb-4 opacity-50" />
                   <p>Select content type and analyze to see results</p>
                 </div>
               ) : (
+                // Full analysis results for button click
                 <div className="space-y-6">
-                  {/* Authenticity Status */}
-                  <div className={`p-4 rounded-lg border ${getStatusColor(result.authenticity_status)}`}>
-                    <div className="flex items-center space-x-3 mb-2">
-                      {getStatusIcon(result.authenticity_status)}
-                      <span className="font-semibold">{getStatusText(result.authenticity_status)}</span>
-                    </div>
-                    <div className="text-sm opacity-90">Confidence: {result.confidence}%</div>
-                  </div>
-
-                  {/* Credibility Score */}
-                  {result.credibility_score && (
-                    <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
-                      <h4 className="text-blue-300 font-semibold mb-3 flex items-center">
-                        <TrendingUp className="w-4 h-4 mr-2" />
-                        Credibility Score
-                      </h4>
-                      <div className="space-y-3">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm">Overall Score</span>
-                          <span className="font-bold text-lg">{result.credibility_score.overall}/100</span>
-                        </div>
-                        <Progress value={result.credibility_score.overall} className="h-2" />
-
-                        <div className="grid grid-cols-2 gap-2 text-xs">
-                          <div>Source: {result.credibility_score.factors.source_reliability}/100</div>
-                          <div>Content: {result.credibility_score.factors.content_authenticity}/100</div>
-                          <div>Fact Check: {result.credibility_score.factors.fact_check_status}/100</div>
-                          <div>AI Detection: {result.credibility_score.factors.ai_detection}/100</div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Real-time Flags */}
-                  {result.real_time_flags && (
-                    <div className="space-y-2">
-                      <h4 className="text-white font-semibold">🚨 Real-time Flags:</h4>
-                      <div className="grid grid-cols-2 gap-2">
-                        {Object.entries(result.real_time_flags).map(([key, value]) => (
-                          <Badge
-                            key={key}
-                            className={value ? "bg-red-500/20 text-red-300" : "bg-green-500/20 text-green-300"}
-                          >
-                            {key.replace(/_/g, " ")}: {value ? "⚠️" : "✅"}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Verified Sources */}
-                  {result.verified_sources?.length > 0 && (
-                    <div>
-                      <h4 className="text-white font-semibold mb-3 flex items-center">
-                        <ExternalLink className="w-4 h-4 mr-2" />
-                        Verified Sources
-                      </h4>
-                      <div className="space-y-2">
-                        {result.verified_sources.map((source: any, index: number) => (
-                          <div key={index} className="bg-green-500/10 border border-green-500/20 rounded p-3">
-                            <div className="flex justify-between items-start">
-                              <div>
-                                <div className="font-medium text-green-300">{source.name}</div>
-                                <div className="text-xs text-green-400">
-                                  Reliability: {source.reliability_score}/100
-                                </div>
-                              </div>
-                              <Badge className="bg-green-500/20 text-green-300">{source.fact_check_result}</Badge>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Recommendation */}
-                  <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-4">
-                    <h4 className="text-purple-300 font-semibold mb-2">💡 Recommendation:</h4>
-                    <p className="text-purple-200 text-sm">{result.suggested_action}</p>
+                  {/* Show full results here similar to real-time but with more detail */}
+                  <div className="text-center py-8 text-gray-400">
+                    <p>Full analysis results will appear here</p>
                   </div>
                 </div>
               )}
@@ -399,22 +645,22 @@ export default function EnhancedDemoPage() {
             {
               icon: "🤖",
               title: "AI Detection",
-              description: "Detects AI-generated text, images, and videos with advanced algorithms",
+              description: "Advanced AI models detect GPT, Claude, and other AI-generated content",
+            },
+            {
+              icon: "📰",
+              title: "News Verification",
+              description: "Deep fact-checking and credibility analysis for news content",
             },
             {
               icon: "🔍",
-              title: "Deepfake Detection",
-              description: "Identifies synthetic media and facial manipulation in real-time",
+              title: "Real-time Research",
+              description: "Instant verification with comprehensive fact-checking",
             },
             {
-              icon: "📊",
-              title: "Credibility Scoring",
-              description: "Multi-factor credibility analysis with source verification",
-            },
-            {
-              icon: "🌐",
-              title: "Real-time Analysis",
-              description: "Instant analysis as you browse with Chrome extension",
+              icon: "🎯",
+              title: "Dual Analysis",
+              description: "Combined AI detection and news verification in one system",
             },
           ].map((feature, index) => (
             <Card key={index} className="bg-white/5 border-white/10 backdrop-blur-xl text-center">
@@ -427,19 +673,18 @@ export default function EnhancedDemoPage() {
           ))}
         </div>
 
-        {/* Hackathon Info */}
+        {/* System Info */}
         <div className="mt-12 text-center">
           <Card className="bg-gradient-to-r from-purple-500/10 to-blue-500/10 border-purple-500/20 backdrop-blur-xl">
             <CardContent className="pt-6">
-              <h3 className="text-2xl font-bold text-white mb-4">🏆 Hackathon Project</h3>
+              <h3 className="text-2xl font-bold text-white mb-4">🚀 Enhanced Detection System</h3>
               <p className="text-gray-300 mb-4">
-                This is a live demonstration of the Reclaim Reality system - a comprehensive solution for detecting
-                AI-generated and manipulated content across the web.
+                Advanced AI detection combined with deep news verification and fact-checking capabilities.
               </p>
               <div className="flex justify-center space-x-4">
-                <Badge className="bg-green-500/20 text-green-300 border-green-500/30">✅ Chrome Extension Ready</Badge>
-                <Badge className="bg-blue-500/20 text-blue-300 border-blue-500/30">✅ Full-Stack Solution</Badge>
-                <Badge className="bg-purple-500/20 text-purple-300 border-purple-500/30">✅ Real-time Detection</Badge>
+                <Badge className="bg-green-500/20 text-green-300 border-green-500/30">✅ AI Detection</Badge>
+                <Badge className="bg-blue-500/20 text-blue-300 border-blue-500/30">✅ News Verification</Badge>
+                <Badge className="bg-purple-500/20 text-purple-300 border-purple-500/30">✅ Real-time Analysis</Badge>
               </div>
             </CardContent>
           </Card>
@@ -449,14 +694,14 @@ export default function EnhancedDemoPage() {
   )
 }
 
-// Sample text generator for demo
+// Enhanced sample text generator
 function getSampleText(type: string): string {
   const samples = {
     "AI-generated news": `Breaking news: Scientists have made a groundbreaking discovery that could revolutionize the way we understand climate change. According to recent studies, researchers have identified a new method that shows promising results in reducing carbon emissions. The findings, published in a leading scientific journal, suggest that this innovative approach could have significant implications for environmental policy. Furthermore, experts believe that this development represents a major step forward in addressing global warming concerns. The research team emphasized the importance of continued investigation to fully understand the potential applications of their work.`,
 
-    "Human blog post": `I can't believe it's already December! This year has flown by so fast. I was just thinking about all the crazy stuff that happened - remember when I accidentally dyed my hair green trying to go blonde? My mom still brings that up at family dinners lol. Anyway, I'm trying to figure out what to get everyone for Christmas. My brother is impossible to shop for because he literally has everything already. Maybe I'll just get him a gift card again... he never complains about those. What are you guys doing for the holidays?`,
+    "Real news article": `WASHINGTON - The Federal Reserve announced Wednesday that it will raise interest rates by 0.25 percentage points, marking the third rate hike this year. Fed Chair Jerome Powell cited ongoing inflation concerns and a robust job market as key factors in the decision. "We remain committed to bringing inflation back to our 2% target," Powell said during a press conference. The decision was unanimous among voting members. Stock markets initially fell following the announcement but recovered by market close. Economists had widely expected the rate increase.`,
 
-    "Social media": `Just had the most amazing coffee at this little place downtown ☕️ The barista was super friendly and they have this cozy reading nook by the window. Perfect spot to work on my novel! #WritingLife #CoffeeShop #LocalBusiness`,
+    "Fake news example": `SHOCKING: Local man discovers doctors HATE this one simple trick that cures everything! You won't believe what happened next! Big Pharma is trying to hide this secret that could save millions of lives. This incredible discovery was found in his grandmother's attic and has been suppressed for decades. Click here to learn the truth they don't want you to know! Warning: This information is being censored everywhere!`,
   }
 
   return samples[type] || ""
