@@ -1,12 +1,11 @@
 "use client"
 
 import type React from "react"
-
 import { useEffect } from "react"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/toaster"
 
-export function ClientLayout({ children }: { children: React.ReactNode }) {
+export default function ClientLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // Suppress hydration warnings in development
     if (process.env.NODE_ENV === "development") {

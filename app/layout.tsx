@@ -1,7 +1,7 @@
 import type React from "react"
 import type { Metadata } from "next"
 import "./globals.css"
-import { ClientLayout } from "./client-layout"
+import ClientLayout from "./client-layout"
 
 export const metadata: Metadata = {
   title: "Reclaim Reality - AI Content Detection",
