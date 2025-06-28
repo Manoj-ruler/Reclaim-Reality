@@ -3,7 +3,7 @@
   "name": "Reclaim Reality",
   "version": "1.0.0",
   "description": "Detect AI-generated, fake, and manipulated content in real-time while browsing the web.",
-  "permissions": ["activeTab", "storage"],
+  "permissions": ["activeTab", "storage","scripting"],
   "host_permissions": ["http://localhost:3000/*", "https://*.vercel.app/*"],
   "action": {
     "default_popup": "popup.html",
@@ -19,6 +19,7 @@
   "background": {
     "service_worker": "background.js"
   },
+  
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

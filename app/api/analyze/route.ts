@@ -1,452 +1,548 @@
 import { type NextRequest, NextResponse } from "next/server"
 
+const DEFAULT_API_KEY = "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";
+
 interface AnalysisRequest {
   text?: string
   imageUrl?: string
   videoUrl?: string
   url?: string
-  contentType: "text" | "image" | "video" | "mixed"
+  contentType: "text" | "image" | "video"
+  realTime?: boolean
 }
 
-interface CredibilityScore {
-  overall: number
-  factors: {
-    source_reliability: number
-    content_authenticity: number
-    fact_check_status: number
-    ai_detection: number
+// Function to get API key
+function getApiKey(): string {
+  const envKey = process.env.OPENAI_API_KEY;
+  if (!envKey) {
+    console.log("Using default API key as environment variable not found");
+    return DEFAULT_API_KEY;
   }
+  return envKey;
 }
 
-interface VerifiedSource {
-  name: string
-  url: string
-  reliability_score: number
-  fact_check_result: "verified" | "disputed" | "false" | "mixed" | "unknown"
+// Function to detect if content is news-related
+function isNewsContent(text: string): boolean {
+  const newsWords = [
+    "breaking news",
+    "reported",
+    "according to",
+    "sources say",
+    "spokesperson",
+    "statement",
+    "announced",
+    "confirmed",
+    "investigation",
+    "authorities",
+    "officials",
+    "government",
+    "president",
+    "minister",
+    "senator",
+    "declared",
+    "claimed",
+    "alleged",
+    "warned",
+    "proposed",
+    "direct threat",
+    "military",
+    "diplomatic",
+    "foreign",
+    "international",
+    "conflict",
+    "crisis",
+    "agreement",
+    "treaty",
+    "sanctions",
+    "summit",
+    "negotiations",
+    "bilateral",
+    "multilateral",
+  ]
+
+  let newsScore = 0
+  const lowerText = text.toLowerCase()
+
+  // Check for news words
+  newsWords.forEach((word) => {
+    if (lowerText.includes(word.toLowerCase())) {
+      newsScore += 1
+    }
+  })
+
+  // Check for news outlet patterns
+  if (/\b(reuters|ap|cnn|bbc|fox|nbc|abc|cbs|npr|telegram|social media)\b/gi.test(text)) {
+    newsScore += 3
+  }
+
+  // Check for official titles and organizations
+  if (/\b(president|minister|secretary|ambassador|general|commander|director|chief|leader|official)\s+\w+/gi.test(text)) {
+    newsScore += 2
+  }
+
+  // Check for country names and international organizations
+  if (/\b(russia|ukraine|china|usa|eu|nato|un|who|imf|world bank)\b/gi.test(text)) {
+    newsScore += 2
+  }
+
+  // Check for date patterns (common in news)
+  if (
+    /\b\d{1,2}\/\d{1,2}\/\d{4}\b/g.test(text) ||
+    /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},?\s+\d{4}\b/gi.test(
+      text,
+    )
+  ) {
+    newsScore += 2
+  }
+
+  // Check for quotes (common in news)
+  const quoteMatches = text.match(/"[^"]*"|'[^']*'/g)
+  if (quoteMatches) {
+    newsScore += Math.min(quoteMatches.length, 3) // Cap at 3 points for quotes
+  }
+
+  // Check for hashtags (common in news sharing)
+  const hashtagMatches = text.match(/#\w+/g)
+  if (hashtagMatches) {
+    newsScore += Math.min(hashtagMatches.length, 2) // Cap at 2 points for hashtags
+  }
+
+  console.log("News detection score:", newsScore)
+  return newsScore >= 3
 }
 
-interface AnalysisResult {
-  content_type: "text" | "image" | "video" | "mixed"
-  authenticity_status: "authentic" | "ai_generated" | "manipulated" | "hyperreal" | "uncertain"
+// Combined AI detection function
+async function performAIDetection(text: string): Promise<{
+  isAI: boolean
   confidence: number
-  credibility_score: CredibilityScore
-  flagged_patterns: string[]
-  manipulation_indicators: string[]
-  verified_sources: VerifiedSource[]
-  suggested_action: string
-  analysis_details: {
-    ai_indicators: string[]
-    human_indicators: string[]
-    technical_analysis: string[]
-    metadata_analysis: string[]
-  }
-  real_time_flags: {
-    deepfake_detected: boolean
-    ai_text_detected: boolean
-    image_manipulation: boolean
-    source_credibility_low: boolean
-  }
-}
-
-// Enhanced AI detection patterns for hyperreal content
-const HYPERREAL_PATTERNS = [
-  {
-    pattern: /\b(breaking|exclusive|shocking|unprecedented|revolutionary|groundbreaking|never before seen)\b/gi,
-    weight: 15,
-    name: "Sensational Language",
-    category: "hyperreal",
-  },
-  {
-    pattern: /\b(scientists discover|new study reveals|experts shocked|doctors hate this|you won't believe)\b/gi,
-    weight: 20,
-    name: "Clickbait Science",
-    category: "hyperreal",
-  },
-  {
-    pattern: /\b(this one trick|secret that|they don't want you to know|hidden truth|exposed)\b/gi,
-    weight: 25,
-    name: "Conspiracy Language",
-    category: "hyperreal",
-  },
-]
-
-const AI_TEXT_PATTERNS = [
-  {
-    pattern: /\b(as an ai|i'm an ai|as a language model|i don't have personal|i cannot feel)\b/gi,
-    weight: 30,
-    name: "AI Self-Reference",
-    category: "ai_generated",
-  },
-  {
-    pattern: /\b(furthermore|moreover|additionally|in conclusion|to summarize|consequently)\b/gi,
-    weight: 8,
-    name: "Formal Transitions",
-    category: "ai_generated",
-  },
-  {
-    pattern: /\b(it's important to note|it's worth noting|keep in mind|bear in mind)\b/gi,
-    weight: 12,
-    name: "Cautionary Phrases",
-    category: "ai_generated",
-  },
-]
-
-const MANIPULATION_INDICATORS = [
-  {
-    pattern: /\b(according to unnamed sources|sources close to|insider reveals|leaked documents)\b/gi,
-    weight: 18,
-    name: "Anonymous Sources",
-    category: "manipulation",
-  },
-  {
-    pattern: /\b(viral video shows|shocking footage|caught on camera|you need to see this)\b/gi,
-    weight: 22,
-    name: "Viral Content Claims",
-    category: "manipulation",
-  },
-]
-
-// Simulated credible sources database
-const CREDIBLE_SOURCES = [
-  { domain: "reuters.com", reliability: 95, type: "news" },
-  { domain: "ap.org", reliability: 94, type: "news" },
-  { domain: "bbc.com", reliability: 92, type: "news" },
-  { domain: "nature.com", reliability: 98, type: "scientific" },
-  { domain: "science.org", reliability: 97, type: "scientific" },
-  { domain: "snopes.com", reliability: 88, type: "fact_check" },
-  { domain: "factcheck.org", reliability: 90, type: "fact_check" },
-  { domain: "politifact.com", reliability: 87, type: "fact_check" },
-]
-
-function analyzeImageManipulation(imageUrl: string): {
-  manipulation_detected: boolean
-  confidence: number
-  indicators: string[]
-} {
-  // Simulated image analysis (in real implementation, use AI vision APIs)
-  const indicators: string[] = []
-  let manipulation_score = 0
-
-  // Simulate detection based on URL patterns (for demo)
-  if (imageUrl.includes("deepfake") || imageUrl.includes("fake")) {
-    manipulation_score += 80
-    indicators.push("Potential deepfake indicators detected")
-  }
-
-  if (imageUrl.includes("generated") || imageUrl.includes("ai")) {
-    manipulation_score += 70
-    indicators.push("AI-generated image signatures found")
-  }
-
-  // Simulate metadata analysis
-  indicators.push("EXIF data analysis: No camera metadata found")
-  indicators.push("Compression artifacts suggest digital manipulation")
-
-  return {
-    manipulation_detected: manipulation_score > 50,
-    confidence: Math.min(95, manipulation_score),
-    indicators,
-  }
-}
-
-function analyzeVideoAuthenticity(videoUrl: string): {
-  deepfake_detected: boolean
-  confidence: number
-  indicators: string[]
-} {
-  // Simulated video analysis
-  const indicators: string[] = []
-  let deepfake_score = 0
-
-  // Simulate deepfake detection
-  if (videoUrl.includes("deepfake") || videoUrl.includes("synthetic")) {
-    deepfake_score += 85
-    indicators.push("Facial inconsistencies detected")
-    indicators.push("Unnatural eye movement patterns")
-  }
-
-  indicators.push("Frame-by-frame analysis completed")
-  indicators.push("Audio-visual synchronization checked")
-
-  return {
-    deepfake_detected: deepfake_score > 60,
-    confidence: Math.min(90, deepfake_score),
-    indicators,
-  }
-}
-
-function calculateCredibilityScore(sourceUrl: string, aiScore: number, manipulationScore: number): CredibilityScore {
-  // Extract domain from URL
-  let domain = ""
+  reasoning: string
+  breakdown: any
+}> {
   try {
-    domain = new URL(sourceUrl).hostname.replace("www.", "")
-  } catch {
-    domain = "unknown"
+    const apiKey = getApiKey();
+    console.log("AI Detection - Using API key type:", apiKey.startsWith("sk-or-") ? "OpenRouter" : "OpenAI");
+
+    const baseURL = apiKey.startsWith("sk-or-") ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1"
+    const model = apiKey.startsWith("sk-or-") ? "openai/gpt-4o" : "gpt-4o"
+
+    const response = await fetch(`${baseURL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        ...(apiKey.startsWith("sk-or-") && {
+          "HTTP-Referer": "http://localhost:3000",
+          "X-Title": "Reclaim Reality AI Detector",
+        }),
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert AI content detector. Analyze text and determine if it was written by AI or humans.
+
+Look for these AI indicators:
+- Repetitive sentence structures
+- Overuse of transition words (furthermore, moreover, however)
+- Balanced, overly diplomatic language
+- Generic, templated responses
+- Perfect grammar with no typos
+
+Look for these human indicators:
+- Personal anecdotes and experiences
+- Typos, grammatical errors, informal language
+- Strong opinions, bias, emotional language
+- Slang, abbreviations (lol, tbh, etc.)
+- Inconsistent writing style
+
+Respond with ONLY this JSON:
+{
+  "isAI": boolean,
+  "confidence": number (65-95),
+  "reasoning": "Brief explanation",
+  "breakdown": {
+    "ai_generated": number,
+    "ai_refined": number,
+    "human_refined": number,
+    "human_written": number
+  }
+}`,
+          },
+          {
+            role: "user",
+            content: `Analyze this text for AI vs human authorship: "${text}"`,
+          },
+        ],
+        temperature: 0.05,
+        max_tokens: 500,
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`API request failed: ${response.status}`)
+    }
+
+    const data = await response.json()
+    const content = data.choices[0].message.content
+
+    const cleanResponse = content.replace(/```json\n?|\n?```/g, "").trim()
+    const analysis = JSON.parse(cleanResponse)
+
+    // Ensure breakdown sums to 100
+    if (!analysis.breakdown) {
+      analysis.breakdown = {
+        ai_generated: analysis.isAI ? 70 : 20,
+        ai_refined: analysis.isAI ? 20 : 25,
+        human_refined: analysis.isAI ? 10 : 25,
+        human_written: analysis.isAI ? 0 : 30,
+      }
+    }
+
+    const total = Object.values(analysis.breakdown).reduce((sum: number, val: any) => sum + Number(val), 0)
+    if (Math.abs(total - 100) > 2) {
+      const factor = 100 / total
+      Object.keys(analysis.breakdown).forEach((key) => {
+        analysis.breakdown[key] = Math.round(analysis.breakdown[key] * factor)
+      })
+    }
+
+    return {
+      isAI: analysis.isAI,
+      confidence: Math.max(65, Math.min(95, analysis.confidence)),
+      reasoning: analysis.reasoning,
+      breakdown: analysis.breakdown,
+    }
+  } catch (error) {
+    console.error("AI detection error:", error)
+    // Fallback analysis
+    return performFallbackAIAnalysis(text)
+  }
+}
+
+// Combined news verification function
+async function performNewsVerification(text: string): Promise<{
+  isReal: boolean
+  credibilityScore: number
+  confidence: number
+  reasoning: string
+  factCheckResults: any
+  researchSummary: string
+}> {
+  try {
+    const apiKey = getApiKey();
+    console.log("Using API key type:", apiKey.startsWith("sk-or-") ? "OpenRouter" : "OpenAI");
+
+    const baseURL = apiKey.startsWith("sk-or-") ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1"
+    const model = apiKey.startsWith("sk-or-") ? "openai/gpt-4o" : "gpt-4o"
+
+    const response = await fetch(`${baseURL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        ...(apiKey.startsWith("sk-or-") && {
+          "HTTP-Referer": "http://localhost:3000",
+          "X-Title": "Reclaim Reality News Verifier",
+        }),
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: [
+          {
+            role: "system",
+            content: `You are a fact-checking expert. Analyze news content for authenticity.
+
+Check for:
+- Factual accuracy of claims
+- Source credibility
+- Misinformation patterns
+- Sensationalized language
+- Conspiracy theory indicators
+
+Respond with ONLY this JSON:
+{
+  "isReal": boolean,
+  "credibilityScore": number (0-100),
+  "confidence": number (70-95),
+  "reasoning": "Brief explanation",
+  "factCheckResults": {
+    "claimsVerified": ["verified claims"],
+    "redFlags": ["misinformation indicators"]
+  },
+  "researchSummary": "Summary of findings"
+}`,
+          },
+          {
+            role: "user",
+            content: `Fact-check this news content: "${text}"`,
+          },
+        ],
+        temperature: 0.1,
+        max_tokens: 800,
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`News API request failed: ${response.status}`)
+    }
+
+    const data = await response.json()
+    const content = data.choices[0].message.content
+
+    const cleanResponse = content.replace(/```json\n?|\n?```/g, "").trim()
+    const analysis = JSON.parse(cleanResponse)
+
+    return {
+      isReal: analysis.isReal,
+      credibilityScore: Math.max(0, Math.min(100, analysis.credibilityScore)),
+      confidence: Math.max(70, Math.min(95, analysis.confidence)),
+      reasoning: analysis.reasoning || "Analysis completed",
+      factCheckResults: analysis.factCheckResults || {
+        claimsVerified: [],
+        redFlags: [],
+      },
+      researchSummary: analysis.researchSummary || "Research completed",
+    }
+  } catch (error) {
+    console.error("News verification error:", error)
+    // Fallback analysis
+    return performFallbackNewsAnalysis(text)
+  }
+}
+
+// Fallback AI analysis
+function performFallbackAIAnalysis(text: string): {
+  isAI: boolean
+  confidence: number
+  reasoning: string
+  breakdown: any
+} {
+  let aiScore = 0
+  let humanScore = 0
+  const indicators = []
+
+  // AI patterns
+  const aiPhrases = ["furthermore", "moreover", "it's important to note", "in conclusion", "to summarize"]
+  const aiCount = aiPhrases.filter((phrase) => text.toLowerCase().includes(phrase)).length
+  if (aiCount > 0) {
+    aiScore += aiCount * 20
+    indicators.push(`${aiCount} AI phrases`)
   }
 
-  // Check against credible sources
-  const sourceInfo = CREDIBLE_SOURCES.find((s) => domain.includes(s.domain))
-  const source_reliability = sourceInfo ? sourceInfo.reliability : 30
+  // Human patterns
+  const humanPhrases = ["lol", "omg", "tbh", "i think", "i feel", "personally"]
+  const humanCount = humanPhrases.filter((phrase) => text.toLowerCase().includes(phrase)).length
+  if (humanCount > 0) {
+    humanScore += humanCount * 20
+    indicators.push(`${humanCount} human expressions`)
+  }
 
-  // Calculate component scores
-  const content_authenticity = Math.max(10, 100 - aiScore - manipulationScore)
-  const fact_check_status = sourceInfo?.type === "fact_check" ? 95 : 60
-  const ai_detection = Math.max(20, 100 - aiScore)
-
-  // Calculate overall score
-  const overall = Math.round(
-    source_reliability * 0.3 + content_authenticity * 0.4 + fact_check_status * 0.2 + ai_detection * 0.1,
-  )
+  const totalScore = Math.max(aiScore + humanScore, 1)
+  const aiProbability = (aiScore / totalScore) * 100
+  const isAI = aiProbability > 55
+  const confidence = Math.min(85, Math.max(65, Math.abs(aiProbability - 50) * 1.5 + 65))
 
   return {
-    overall,
-    factors: {
-      source_reliability,
-      content_authenticity,
-      fact_check_status,
-      ai_detection,
+    isAI,
+    confidence,
+    reasoning: `Fallback analysis: ${indicators.join(", ")}`,
+    breakdown: {
+      ai_generated: Math.round(aiProbability * 0.8),
+      ai_refined: Math.round(aiProbability * 0.2),
+      human_refined: Math.round((100 - aiProbability) * 0.3),
+      human_written: Math.round((100 - aiProbability) * 0.7),
     },
   }
 }
 
-function findVerifiedSources(content: string, sourceUrl: string): VerifiedSource[] {
-  // Simulate finding related verified sources
-  const sources: VerifiedSource[] = []
-
-  // Add some credible sources based on content type
-  if (content.toLowerCase().includes("climate") || content.toLowerCase().includes("science")) {
-    sources.push({
-      name: "Nature Scientific Reports",
-      url: "https://nature.com/articles/climate-research",
-      reliability_score: 98,
-      fact_check_result: "verified",
-    })
-  }
-
-  if (content.toLowerCase().includes("news") || content.toLowerCase().includes("breaking")) {
-    sources.push({
-      name: "Reuters Fact Check",
-      url: "https://reuters.com/fact-check",
-      reliability_score: 95,
-      fact_check_result: "verified",
-    })
-  }
-
-  // Always add a fact-checking source
-  sources.push({
-    name: "Snopes Fact Check",
-    url: "https://snopes.com/fact-check",
-    reliability_score: 88,
-    fact_check_result: "unknown",
-  })
-
-  return sources
-}
-
-function analyzeTextContent(text: string): {
-  aiScore: number
-  manipulationScore: number
-  hyperrealScore: number
-  flaggedPatterns: string[]
-  aiIndicators: string[]
-  technicalAnalysis: string[]
+// Fallback news analysis
+function performFallbackNewsAnalysis(text: string): {
+  isReal: boolean
+  credibilityScore: number
+  confidence: number
+  reasoning: string
+  factCheckResults: any
+  researchSummary: string
 } {
-  let aiScore = 0
-  let manipulationScore = 0
-  let hyperrealScore = 0
-  const flaggedPatterns: string[] = []
-  const aiIndicators: string[] = []
-  const technicalAnalysis: string[] = []
+  let credibilityScore = 70
+  const redFlags = []
+  const verified = []
 
-  // Analyze AI patterns
-  AI_TEXT_PATTERNS.forEach((item) => {
-    const matches = text.match(item.pattern)
-    if (matches) {
-      const score = matches.length * item.weight
-      aiScore += score
-      aiIndicators.push(`${item.name}: "${matches[0]}"`)
-      flaggedPatterns.push(`AI Pattern - ${item.name}`)
-    }
-  })
-
-  // Analyze hyperreal patterns
-  HYPERREAL_PATTERNS.forEach((item) => {
-    const matches = text.match(item.pattern)
-    if (matches) {
-      const score = matches.length * item.weight
-      hyperrealScore += score
-      flaggedPatterns.push(`Hyperreal Pattern - ${item.name}`)
-    }
-  })
-
-  // Analyze manipulation indicators
-  MANIPULATION_INDICATORS.forEach((item) => {
-    const matches = text.match(item.pattern)
-    if (matches) {
-      const score = matches.length * item.weight
-      manipulationScore += score
-      flaggedPatterns.push(`Manipulation Indicator - ${item.name}`)
-    }
-  })
-
-  // Technical analysis
-  const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 10)
-  if (sentences.length > 0) {
-    const avgLength = sentences.reduce((sum, s) => sum + s.length, 0) / sentences.length
-    technicalAnalysis.push(`Average sentence length: ${Math.round(avgLength)} characters`)
-
-    if (avgLength > 120) {
-      aiScore += 15
-      technicalAnalysis.push("Unusually long sentences detected (AI-like)")
-    }
+  // Check for sensationalized language
+  const sensationalWords = ["shocking", "unbelievable", "exclusive", "bombshell"]
+  const sensationalCount = sensationalWords.filter((word) => text.toLowerCase().includes(word)).length
+  if (sensationalCount > 2) {
+    credibilityScore -= 20
+    redFlags.push("Sensationalized language")
   }
+
+  // Check for proper attribution
+  if (text.toLowerCase().includes("according to") || text.toLowerCase().includes("sources say")) {
+    credibilityScore += 15
+    verified.push("Source attribution found")
+  } else {
+    credibilityScore -= 10
+    redFlags.push("Lack of source attribution")
+  }
+
+  // Check for conspiracy language
+  const conspiracyWords = ["cover-up", "conspiracy", "hidden truth", "wake up"]
+  const conspiracyCount = conspiracyWords.filter((word) => text.toLowerCase().includes(word)).length
+  if (conspiracyCount > 0) {
+    credibilityScore -= 30
+    redFlags.push("Conspiracy theory language")
+  }
+
+  credibilityScore = Math.max(0, Math.min(100, credibilityScore))
 
   return {
-    aiScore,
-    manipulationScore,
-    hyperrealScore,
-    flaggedPatterns,
-    aiIndicators,
-    technicalAnalysis,
+    isReal: credibilityScore > 60,
+    credibilityScore,
+    confidence: Math.min(85, Math.max(70, Math.abs(credibilityScore - 50) + 70)),
+    reasoning: `Pattern analysis: ${redFlags.length} red flags, ${verified.length} positive indicators`,
+    factCheckResults: {
+      claimsVerified: verified,
+      redFlags: redFlags,
+    },
+    researchSummary: `Analyzed ${text.split(" ").length} words for misinformation patterns`,
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
+    const startTime = Date.now()
     console.log("🔍 Enhanced analysis API called")
 
     const body: AnalysisRequest = await request.json()
-    console.log("📝 Request type:", body.contentType)
 
     if (!body.text && !body.imageUrl && !body.videoUrl) {
       return NextResponse.json({ error: "No content provided for analysis" }, { status: 400 })
     }
 
-    let textAnalysis = {
-      aiScore: 0,
-      manipulationScore: 0,
-      hyperrealScore: 0,
-      flaggedPatterns: [],
-      aiIndicators: [],
-      technicalAnalysis: [],
-    }
-    let imageAnalysis = { manipulation_detected: false, confidence: 0, indicators: [] }
-    let videoAnalysis = { deepfake_detected: false, confidence: 0, indicators: [] }
+    // For text analysis
+    if (body.text && body.contentType === "text") {
+      const isNews = isNewsContent(body.text)
 
-    // Analyze text content
-    if (body.text) {
-      textAnalysis = analyzeTextContent(body.text)
-    }
+      // Perform AI detection
+      const aiResult = await performAIDetection(body.text)
 
-    // Analyze image content
-    if (body.imageUrl) {
-      imageAnalysis = analyzeImageManipulation(body.imageUrl)
-    }
+      let result: any = {
+        content_type: body.contentType,
+        is_news_content: isNews,
 
-    // Analyze video content
-    if (body.videoUrl) {
-      videoAnalysis = analyzeVideoAuthenticity(body.videoUrl)
-    }
+        // AI Detection Results
+        authenticity_status: aiResult.isAI ? "ai_generated" : "authentic",
+        confidence: aiResult.confidence,
+        ai_probability: aiResult.isAI ? aiResult.confidence : 100 - aiResult.confidence,
+        human_probability: aiResult.isAI ? 100 - aiResult.confidence : aiResult.confidence,
+        ai_reasoning: aiResult.reasoning,
+        breakdown: aiResult.breakdown,
 
-    // Calculate overall scores
-    const totalAiScore = textAnalysis.aiScore
-    const totalManipulationScore =
-      textAnalysis.manipulationScore +
-      (imageAnalysis.manipulation_detected ? 50 : 0) +
-      (videoAnalysis.deepfake_detected ? 60 : 0)
-    const totalHyperrealScore = textAnalysis.hyperrealScore
+        analysis_time: Date.now() - startTime,
+      }
 
-    // Determine authenticity status
-    let authenticity_status: "authentic" | "ai_generated" | "manipulated" | "hyperreal" | "uncertain"
-    let confidence = 0
+      // If it's news content, also perform news verification
+      if (isNews) {
+        console.log("📰 News content detected, performing verification...")
+        const newsResult = await performNewsVerification(body.text)
 
-    if (totalHyperrealScore > 40) {
-      authenticity_status = "hyperreal"
-      confidence = Math.min(95, 60 + totalHyperrealScore * 0.5)
-    } else if (totalAiScore > 50) {
-      authenticity_status = "ai_generated"
-      confidence = Math.min(90, 50 + totalAiScore * 0.4)
-    } else if (totalManipulationScore > 40) {
-      authenticity_status = "manipulated"
-      confidence = Math.min(85, 50 + totalManipulationScore * 0.4)
-    } else if (totalAiScore < 20 && totalManipulationScore < 20) {
-      authenticity_status = "authentic"
-      confidence = Math.min(80, 60 + (40 - totalAiScore - totalManipulationScore) * 0.3)
-    } else {
-      authenticity_status = "uncertain"
-      confidence = 45
-    }
+        result = {
+          ...result,
+          // News Verification Results
+          news_authenticity: newsResult.isReal ? "real" : "fake",
+          news_credibility_score: newsResult.credibilityScore,
+          news_confidence: newsResult.confidence,
+          news_reasoning: newsResult.reasoning,
+          fact_check_results: {
+            claims_verified: newsResult.factCheckResults.claimsVerified || [],
+            claims_disputed: [],
+            sources_found: [],
+            red_flags: newsResult.factCheckResults.redFlags || [],
+          },
+          research_summary: newsResult.researchSummary,
 
-    // Calculate credibility score
-    const credibility_score = calculateCredibilityScore(body.url || "unknown", totalAiScore, totalManipulationScore)
+          // Enhanced credibility scoring
+          credibility_score: {
+            overall: Math.round(aiResult.confidence * 0.3 + newsResult.credibilityScore * 0.7),
+            factors: {
+              ai_detection: aiResult.confidence,
+              content_authenticity: newsResult.credibilityScore,
+              fact_check_status: newsResult.isReal ? 90 : 20,
+              source_reliability: body.url ? 75 : 60,
+            },
+          },
 
-    // Find verified sources
-    const verified_sources = findVerifiedSources(body.text || "", body.url || "")
+          // Real-time flags
+          real_time_flags: {
+            ai_generated: aiResult.isAI,
+            fake_news: !newsResult.isReal,
+            misleading_content: newsResult.credibilityScore < 50,
+            unverified_claims: newsResult.factCheckResults.redFlags?.length > 0,
+            low_credibility: newsResult.credibilityScore < 40,
+          },
 
-    // Compile all indicators
-    const manipulation_indicators = [
-      ...imageAnalysis.indicators,
-      ...videoAnalysis.indicators,
-      ...textAnalysis.flaggedPatterns.filter((p) => p.includes("Manipulation")),
-    ]
+          // Enhanced suggested action
+          suggested_action: !newsResult.isReal
+            ? "⚠️ This appears to be fake news. Verify with credible sources before sharing."
+            : newsResult.isReal
+              ? "✅ This appears to be legitimate news content."
+              : "❓ News authenticity uncertain. Cross-check with multiple sources.",
+        }
+      } else {
+        // For non-news content
+        result = {
+          ...result,
+          credibility_score: {
+            overall: aiResult.confidence,
+            factors: {
+              ai_detection: aiResult.confidence,
+              content_authenticity: aiResult.isAI ? 30 : 80,
+              fact_check_status: 70,
+              source_reliability: body.url ? 75 : 60,
+            },
+          },
+          real_time_flags: {
+            ai_generated: aiResult.isAI,
+            fake_news: false,
+            misleading_content: false,
+            unverified_claims: false,
+            low_credibility: false,
+          },
+          suggested_action: aiResult.isAI
+            ? "🤖 This content appears to be AI-generated."
+            : "👤 This content appears to be human-written.",
+        }
+      }
 
-    // Real-time flags
-    const real_time_flags = {
-      deepfake_detected: videoAnalysis.deepfake_detected,
-      ai_text_detected: totalAiScore > 30,
-      image_manipulation: imageAnalysis.manipulation_detected,
-      source_credibility_low: credibility_score.overall < 50,
-    }
+      console.log("✅ Enhanced analysis complete:", {
+        isNews: isNews,
+        aiStatus: result.authenticity_status,
+        newsStatus: result.news_authenticity,
+        time: result.analysis_time + "ms",
+      })
 
-    // Suggested action based on analysis
-    let suggested_action = ""
-    if (authenticity_status === "hyperreal") {
-      suggested_action =
-        "⚠️ HYPERREAL CONTENT DETECTED: This content shows signs of being artificially enhanced or manipulated to appear more dramatic than reality. Verify with multiple credible sources before sharing."
-    } else if (authenticity_status === "ai_generated") {
-      suggested_action =
-        "🤖 AI-GENERATED CONTENT: This appears to be created by artificial intelligence. Verify facts independently and check original sources."
-    } else if (authenticity_status === "manipulated") {
-      suggested_action =
-        "🚨 MANIPULATION DETECTED: This content may have been altered or contains misleading information. Cross-reference with verified sources."
-    } else if (authenticity_status === "authentic") {
-      suggested_action =
-        "✅ CONTENT APPEARS AUTHENTIC: While this content seems genuine, always verify important claims with multiple sources."
-    } else {
-      suggested_action =
-        "❓ UNCERTAIN AUTHENTICITY: Mixed signals detected. Exercise caution and verify with trusted sources."
-    }
-
-    const result: AnalysisResult = {
-      content_type: body.contentType,
-      authenticity_status,
-      confidence: Math.round(confidence),
-      credibility_score,
-      flagged_patterns: textAnalysis.flaggedPatterns,
-      manipulation_indicators,
-      verified_sources,
-      suggested_action,
-      analysis_details: {
-        ai_indicators: textAnalysis.aiIndicators,
-        human_indicators: [],
-        technical_analysis: textAnalysis.technicalAnalysis,
-        metadata_analysis: [...imageAnalysis.indicators, ...videoAnalysis.indicators],
-      },
-      real_time_flags,
+      return NextResponse.json(result)
     }
 
-    console.log("✅ Enhanced analysis complete:", {
-      status: authenticity_status,
-      confidence,
-      credibility: credibility_score.overall,
-    })
+    // For image/video analysis (placeholder)
+    else {
+      const result = {
+        content_type: body.contentType,
+        authenticity_status: "uncertain",
+        confidence: 50,
+        reasoning: "Image/video analysis not yet implemented",
+        suggested_action: "Manual verification recommended for media content",
+        analysis_time: Date.now() - startTime,
+      }
 
-    return NextResponse.json(result)
+      return NextResponse.json(result)
+    }
   } catch (error) {
     console.error("❌ Enhanced analysis error:", error)
     return NextResponse.json(
       {
-        error: "Failed to analyze content",
+        error: "Analysis failed",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
