@@ -1,5 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 
+const DEFAULT_API_KEY = "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";
+
 interface AnalysisRequest {
   text?: string
   imageUrl?: string
@@ -7,6 +9,16 @@ interface AnalysisRequest {
   url?: string
   contentType: "text" | "image" | "video"
   realTime?: boolean
+}
+
+// Function to get API key
+function getApiKey(): string {
+  const envKey = process.env.OPENAI_API_KEY;
+  if (!envKey) {
+    console.log("Using default API key as environment variable not found");
+    return DEFAULT_API_KEY;
+  }
+  return envKey;
 }
 
 // Function to detect if content is news-related
@@ -27,20 +39,50 @@ function isNewsContent(text: string): boolean {
     "president",
     "minister",
     "senator",
+    "declared",
+    "claimed",
+    "alleged",
+    "warned",
+    "proposed",
+    "direct threat",
+    "military",
+    "diplomatic",
+    "foreign",
+    "international",
+    "conflict",
+    "crisis",
+    "agreement",
+    "treaty",
+    "sanctions",
+    "summit",
+    "negotiations",
+    "bilateral",
+    "multilateral",
   ]
 
   let newsScore = 0
   const lowerText = text.toLowerCase()
 
+  // Check for news words
   newsWords.forEach((word) => {
-    if (lowerText.includes(word)) {
+    if (lowerText.includes(word.toLowerCase())) {
       newsScore += 1
     }
   })
 
   // Check for news outlet patterns
-  if (/\b(reuters|ap|cnn|bbc|fox|nbc|abc|cbs|npr)\b/gi.test(text)) {
+  if (/\b(reuters|ap|cnn|bbc|fox|nbc|abc|cbs|npr|telegram|social media)\b/gi.test(text)) {
     newsScore += 3
+  }
+
+  // Check for official titles and organizations
+  if (/\b(president|minister|secretary|ambassador|general|commander|director|chief|leader|official)\s+\w+/gi.test(text)) {
+    newsScore += 2
+  }
+
+  // Check for country names and international organizations
+  if (/\b(russia|ukraine|china|usa|eu|nato|un|who|imf|world bank)\b/gi.test(text)) {
+    newsScore += 2
   }
 
   // Check for date patterns (common in news)
@@ -54,10 +96,18 @@ function isNewsContent(text: string): boolean {
   }
 
   // Check for quotes (common in news)
-  if (/"[^"]*"/g.test(text)) {
-    newsScore += 1
+  const quoteMatches = text.match(/"[^"]*"|'[^']*'/g)
+  if (quoteMatches) {
+    newsScore += Math.min(quoteMatches.length, 3) // Cap at 3 points for quotes
   }
 
+  // Check for hashtags (common in news sharing)
+  const hashtagMatches = text.match(/#\w+/g)
+  if (hashtagMatches) {
+    newsScore += Math.min(hashtagMatches.length, 2) // Cap at 2 points for hashtags
+  }
+
+  console.log("News detection score:", newsScore)
   return newsScore >= 3
 }
 
@@ -69,10 +119,8 @@ async function performAIDetection(text: string): Promise<{
   breakdown: any
 }> {
   try {
-    const apiKey = process.env.OPENAI_API_KEY
-    if (!apiKey) {
-      throw new Error("No API key found")
-    }
+    const apiKey = getApiKey();
+    console.log("AI Detection - Using API key type:", apiKey.startsWith("sk-or-") ? "OpenRouter" : "OpenAI");
 
     const baseURL = apiKey.startsWith("sk-or-") ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1"
     const model = apiKey.startsWith("sk-or-") ? "openai/gpt-4o" : "gpt-4o"
@@ -182,10 +230,8 @@ async function performNewsVerification(text: string): Promise<{
   researchSummary: string
 }> {
   try {
-    const apiKey = process.env.OPENAI_API_KEY
-    if (!apiKey) {
-      throw new Error("No API key found")
-    }
+    const apiKey = getApiKey();
+    console.log("Using API key type:", apiKey.startsWith("sk-or-") ? "OpenRouter" : "OpenAI");
 
     const baseURL = apiKey.startsWith("sk-or-") ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1"
     const model = apiKey.startsWith("sk-or-") ? "openai/gpt-4o" : "gpt-4o"
