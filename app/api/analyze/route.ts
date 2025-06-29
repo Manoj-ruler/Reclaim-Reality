@@ -5,6 +5,7 @@ const DEFAULT_API_KEY = "sk-or-v1-ed4a897803430de54bcbb2b38e34c95f69229ef9d6cf2a
 interface AnalysisRequest {
   text?: string
   imageUrl?: string
+  imageFile?: File
   videoUrl?: string
   url?: string
   contentType: "text" | "image" | "video"
@@ -109,6 +110,31 @@ function isNewsContent(text: string): boolean {
 
   console.log("News detection score:", newsScore)
   return newsScore >= 3
+}
+
+// Function to handle image upload and convert to base64
+async function handleImageUpload(formData: FormData): Promise<string> {
+  const file = formData.get('image') as File;
+  if (!file) {
+    throw new Error('No image file provided');
+  }
+
+  // Check file type
+  if (!file.type.startsWith('image/')) {
+    throw new Error('File must be an image');
+  }
+
+  // Check file size (e.g., 5MB limit)
+  if (file.size > 5 * 1024 * 1024) {
+    throw new Error('Image file size must be less than 5MB');
+  }
+
+  // Convert to base64
+  const bytes = await file.arrayBuffer();
+  const buffer = Buffer.from(bytes);
+  const base64Image = buffer.toString('base64');
+  const mimeType = file.type;
+  return `data:${mimeType};base64,${base64Image}`;
 }
 
 // Combined AI detection function
@@ -409,12 +435,141 @@ function performFallbackNewsAnalysis(text: string): {
   }
 }
 
+// Modify the performImageAnalysis function to accept base64 images
+async function performImageAnalysis(image: string): Promise<{
+  isAI: boolean
+  confidence: number
+  reasoning: string
+  imageType: string
+  detectedFeatures: string[]
+}> {
+  try {
+    const apiKey = getApiKey();
+    console.log("Image Analysis - Using API key type:", apiKey.startsWith("sk-or-") ? "OpenRouter" : "OpenAI");
+
+    const baseURL = apiKey.startsWith("sk-or-") ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1"
+    const model = apiKey.startsWith("sk-or-") ? "openai/gpt-4-vision-preview" : "gpt-4-vision-preview"
+
+    // Check if the image is a URL or base64
+    const imageContent = image.startsWith('data:') ? image : { url: image };
+
+    const response = await fetch(`${baseURL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        ...(apiKey.startsWith("sk-or-") && {
+          "HTTP-Referer": "http://localhost:3000",
+          "X-Title": "Reclaim Reality Image Analyzer",
+        }),
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert AI image analyzer. Analyze images to determine if they were AI-generated or real photos.
+
+Look for these AI generation indicators:
+- Inconsistent textures
+- Unnatural lighting and shadows
+- Asymmetrical features
+- Artifacts and distortions
+- Unrealistic details
+- Perfect symmetry
+- Unusual color patterns
+
+Look for these real photo indicators:
+- Natural imperfections
+- Consistent lighting
+- Realistic textures
+- Natural asymmetry
+- Environmental context
+- Authentic details
+- Normal perspective
+
+Respond with ONLY this JSON:
+{
+  "isAI": boolean,
+  "confidence": number (65-95),
+  "reasoning": "Brief explanation",
+  "imageType": "photo|artwork|graphic|composite",
+  "detectedFeatures": ["list of key features analyzed"]
+}`
+          },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Analyze this image for AI vs real photo indicators:" },
+              { type: "image_url", image_url: imageContent }
+            ]
+          }
+        ],
+        max_tokens: 500,
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`Image API request failed: ${response.status}`)
+    }
+
+    const data = await response.json()
+    const content = data.choices[0].message.content
+
+    const cleanResponse = content.replace(/```json\n?|\n?```/g, "").trim()
+    const analysis = JSON.parse(cleanResponse)
+
+    return {
+      isAI: analysis.isAI,
+      confidence: Math.max(65, Math.min(95, analysis.confidence)),
+      reasoning: analysis.reasoning,
+      imageType: analysis.imageType,
+      detectedFeatures: analysis.detectedFeatures || []
+    }
+  } catch (error) {
+    console.error("Image analysis error:", error)
+    return {
+      isAI: true,
+      confidence: 70,
+      reasoning: "Analysis failed, defaulting to cautionary result",
+      imageType: "unknown",
+      detectedFeatures: ["analysis_error"]
+    }
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const startTime = Date.now()
     console.log("🔍 Enhanced analysis API called")
 
-    const body: AnalysisRequest = await request.json()
+    // Check content type of the request
+    const contentType = request.headers.get('content-type') || '';
+    
+    let body: AnalysisRequest;
+
+    if (contentType.includes('multipart/form-data')) {
+      // Handle form data (file upload)
+      const formData = await request.formData();
+      const contentType = formData.get('contentType') as string;
+      
+      if (contentType === 'image') {
+        const base64Image = await handleImageUpload(formData);
+        body = {
+          contentType: 'image',
+          imageUrl: base64Image
+        };
+      } else {
+        const text = formData.get('text') as string;
+        body = {
+          contentType: 'text',
+          text: text
+        };
+      }
+    } else {
+      // Handle JSON request
+      body = await request.json();
+    }
 
     if (!body.text && !body.imageUrl && !body.videoUrl) {
       return NextResponse.json({ error: "No content provided for analysis" }, { status: 400 })
@@ -525,14 +680,77 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(result)
     }
 
-    // For image/video analysis (placeholder)
+    // For image analysis
+    else if (body.imageUrl && body.contentType === "image") {
+      const imageResult = await performImageAnalysis(body.imageUrl)
+
+      const result = {
+        content_type: body.contentType,
+        authenticity_status: imageResult.isAI ? "ai_generated" : "authentic",
+        confidence: imageResult.confidence,
+        ai_probability: imageResult.isAI ? imageResult.confidence : 100 - imageResult.confidence,
+        human_probability: imageResult.isAI ? 100 - imageResult.confidence : imageResult.confidence,
+        ai_reasoning: imageResult.reasoning,
+        
+        image_analysis: {
+          image_type: imageResult.imageType,
+          detected_features: imageResult.detectedFeatures,
+          technical_assessment: {
+            lighting_natural: !imageResult.detectedFeatures.includes("unnatural_lighting"),
+            texture_consistent: !imageResult.detectedFeatures.includes("inconsistent_textures"),
+            artifacts_present: imageResult.detectedFeatures.includes("artifacts"),
+            symmetry_natural: !imageResult.detectedFeatures.includes("perfect_symmetry"),
+            color_natural: !imageResult.detectedFeatures.includes("unusual_colors")
+          }
+        },
+
+        credibility_score: {
+          overall: Math.round(
+            (imageResult.isAI ? 30 : 80) * 0.6 + // Base authenticity score
+            (imageResult.confidence) * 0.4 // Confidence weighting
+          ),
+          factors: {
+            ai_detection: imageResult.confidence,
+            visual_authenticity: imageResult.isAI ? 30 : 80,
+            technical_quality: imageResult.detectedFeatures.length < 3 ? 80 : 50,
+            feature_analysis: 100 - (imageResult.detectedFeatures.length * 10)
+          }
+        },
+
+        real_time_flags: {
+          ai_generated: imageResult.isAI,
+          low_quality: imageResult.detectedFeatures.length > 5,
+          suspicious_features: imageResult.detectedFeatures.length > 3,
+          needs_review: imageResult.confidence < 75
+        },
+
+        suggested_action: imageResult.isAI
+          ? "🤖 This image appears to be AI-generated. Exercise caution when sharing."
+          : imageResult.confidence > 85
+            ? "📸 This appears to be an authentic photograph."
+            : "⚠️ Image authenticity uncertain - manual review recommended.",
+
+        analysis_time: Date.now() - startTime
+      }
+
+      console.log("✅ Image analysis complete:", {
+        status: result.authenticity_status,
+        confidence: result.confidence,
+        features: imageResult.detectedFeatures.length,
+        time: result.analysis_time + "ms"
+      })
+
+      return NextResponse.json(result)
+    }
+
+    // For video analysis (placeholder)
     else {
       const result = {
         content_type: body.contentType,
         authenticity_status: "uncertain",
         confidence: 50,
-        reasoning: "Image/video analysis not yet implemented",
-        suggested_action: "Manual verification recommended for media content",
+        reasoning: "Video analysis not yet implemented",
+        suggested_action: "Manual verification recommended for video content",
         analysis_time: Date.now() - startTime,
       }
 

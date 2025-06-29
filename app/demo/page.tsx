@@ -24,6 +24,8 @@ import {
   Search,
   Flag,
 } from "lucide-react"
+import { ImageUpload } from "@/components/ui/image-upload"
+import { cn } from "@/lib/utils"
 
 export default function EnhancedDemoPage() {
   const [mounted, setMounted] = useState(false)
@@ -44,32 +46,46 @@ export default function EnhancedDemoPage() {
     human_refined: 0,
     human_written: 0,
   })
+  const [selectedImage, setSelectedImage] = useState<File | null>(null)
 
   // Prevent hydration issues
   useEffect(() => {
     setMounted(true)
   }, [])
 
+  const handleImageSelect = (file: File) => {
+    setSelectedImage(file)
+    setImageUrl("") // Clear any existing URL
+  }
+
   const analyzeContent = async () => {
-    if (!text && !imageUrl && !videoUrl) return
+    if (!text && !selectedImage && !videoUrl) return
 
     setIsAnalyzing(true)
     setError("")
     setResult(null)
 
     try {
-      const requestBody = {
-        text: text || undefined,
-        imageUrl: imageUrl || undefined,
-        videoUrl: videoUrl || undefined,
-        url: sourceUrl || undefined,
-        contentType: activeTab as "text" | "image" | "video",
+      let formData = new FormData()
+      
+      if (activeTab === "text") {
+        formData.append("text", text)
+        formData.append("contentType", "text")
+      } else if (activeTab === "image" && selectedImage) {
+        formData.append("image", selectedImage)
+        formData.append("contentType", "image")
+      } else if (activeTab === "video") {
+        formData.append("videoUrl", videoUrl)
+        formData.append("contentType", "video")
+      }
+
+      if (sourceUrl) {
+        formData.append("url", sourceUrl)
       }
 
       const response = await fetch("/api/analyze", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
+        body: formData,
       })
 
       if (!response.ok) {
@@ -277,23 +293,27 @@ export default function EnhancedDemoPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-3 bg-white/10">
-                  <TabsTrigger value="text" className="data-[state=active]:bg-purple-600">
-                    <FileText className="w-4 h-4 mr-2" />
+              <Tabs defaultValue="text" className="w-full" onValueChange={(value) => {
+                setActiveTab(value)
+                setError("")
+                setResult(null)
+              }}>
+                <TabsList className="grid w-full grid-cols-3 mb-4">
+                  <TabsTrigger value="text" className="flex items-center gap-2">
+                    <FileText className="w-4 h-4" />
                     Text
                   </TabsTrigger>
-                  <TabsTrigger value="image" className="data-[state=active]:bg-purple-600">
-                    <Eye className="w-4 h-4 mr-2" />
+                  <TabsTrigger value="image" className="flex items-center gap-2">
+                    <Eye className="w-4 h-4" />
                     Image
                   </TabsTrigger>
-                  <TabsTrigger value="video" className="data-[state=active]:bg-purple-600">
-                    <Video className="w-4 h-4 mr-2" />
+                  <TabsTrigger value="video" className="flex items-center gap-2">
+                    <Video className="w-4 h-4" />
                     Video
                   </TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="text" className="space-y-4">
+                <TabsContent value="text">
                   <Textarea
                     key="text-input"
                     placeholder="Paste news articles, social media posts, or any text content for AI detection and news verification..."
@@ -316,20 +336,64 @@ export default function EnhancedDemoPage() {
                   />
                 </TabsContent>
 
-                <TabsContent value="image" className="space-y-4">
-                  <Input
-                    key="image-input"
-                    placeholder="Enter image URL to analyze for manipulation..."
-                    value={imageUrl}
-                    onChange={(e) => setImageUrl(e.target.value)}
-                    className="bg-white/5 border-white/20 text-white placeholder:text-gray-400"
-                  />
-                  <div className="text-sm text-gray-400">
-                    Analyzes for deepfakes, AI-generated images, and digital manipulation
-                  </div>
+                <TabsContent value="image">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Eye className="w-5 h-5" />
+                        Image Analysis
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-4">
+                        <ImageUpload
+                          onImageSelect={handleImageSelect}
+                          className="mb-4"
+                        />
+                        
+                        <div className="text-sm text-gray-400 mt-2">
+                          {selectedImage && (
+                            <p>Selected: {selectedImage.name} ({Math.round(selectedImage.size / 1024)} KB)</p>
+                          )}
+                        </div>
+
+                        <Input
+                          type="url"
+                          placeholder="Optional: Source URL of the image"
+                          value={sourceUrl}
+                          onChange={(e) => setSourceUrl(e.target.value)}
+                          className="bg-white/5 border-white/20 text-white placeholder:text-gray-400"
+                        />
+
+                        <Button
+                          onClick={analyzeContent}
+                          disabled={isAnalyzing || !selectedImage}
+                          className="w-full bg-purple-600 hover:bg-purple-700"
+                        >
+                          {isAnalyzing ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              Analyzing...
+                            </>
+                          ) : (
+                            <>
+                              <Search className="w-4 h-4 mr-2" />
+                              Analyze Image
+                            </>
+                          )}
+                        </Button>
+
+                        {error && (
+                          <div className="text-red-400 text-sm mt-2">
+                            Error: {error}
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
                 </TabsContent>
 
-                <TabsContent value="video" className="space-y-4">
+                <TabsContent value="video">
                   <Input
                     key="video-input"
                     placeholder="Enter video URL to analyze for deepfakes..."
@@ -343,18 +407,10 @@ export default function EnhancedDemoPage() {
                 </TabsContent>
               </Tabs>
 
-              <Input
-                key="source-input"
-                placeholder="Source URL (optional) - for enhanced credibility analysis"
-                value={sourceUrl}
-                onChange={(e) => setSourceUrl(e.target.value)}
-                className="bg-white/5 border-white/20 text-white placeholder:text-gray-400"
-              />
-
               <div className="flex space-x-4">
                 <Button
                   onClick={analyzeContent}
-                  disabled={(!text && !imageUrl && !videoUrl) || isAnalyzing}
+                  disabled={(!text && !selectedImage && !videoUrl) || isAnalyzing}
                   className="flex-1 bg-purple-600 hover:bg-purple-700"
                 >
                   {isAnalyzing ? (
@@ -417,7 +473,8 @@ export default function EnhancedDemoPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {activeTab === "text" && text ? (
+              {/* Text Analysis Results */}
+              {activeTab === "text" && text && (
                 <div className="space-y-6">
                   {/* Word Count & Status */}
                   <div className="flex justify-between items-center text-sm">
@@ -621,18 +678,140 @@ export default function EnhancedDemoPage() {
                     </div>
                   )}
                 </div>
-              ) : !result ? (
-                <div className="text-center py-12 text-gray-400">
-                  <Shield className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                  <p>Select content type and analyze to see results</p>
-                </div>
-              ) : (
-                // Full analysis results for button click
+              )}
+
+              {/* Image Analysis Results */}
+              {activeTab === "image" && result && (
                 <div className="space-y-6">
-                  {/* Show full results here similar to real-time but with more detail */}
-                  <div className="text-center py-8 text-gray-400">
-                    <p>Full analysis results will appear here</p>
+                  {/* Status Badge */}
+                  <div className="flex items-center justify-between">
+                    <Badge
+                      className={cn(
+                        "text-sm px-4 py-1",
+                        getStatusColor(result.authenticity_status)
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        {getStatusIcon(result.authenticity_status)}
+                        {getStatusText(result.authenticity_status)}
+                      </div>
+                    </Badge>
+                    <Badge variant="outline" className="text-sm">
+                      Confidence: {result.confidence}%
+                    </Badge>
                   </div>
+
+                  {/* AI Probability */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span>AI Generated Probability</span>
+                      <span>{result.ai_probability}%</span>
+                    </div>
+                    <Progress value={result.ai_probability} className="h-2" />
+                  </div>
+
+                  {/* Image Analysis Details */}
+                  {result.image_analysis && (
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-semibold">Image Analysis</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <p className="text-sm text-gray-400">Image Type</p>
+                          <p className="font-medium">{result.image_analysis.image_type}</p>
+                        </div>
+                        <div className="space-y-2">
+                          <p className="text-sm text-gray-400">Technical Assessment</p>
+                          <div className="space-y-1">
+                            {Object.entries(result.image_analysis.technical_assessment).map(([key, value]) => (
+                              <div key={key} className="flex items-center gap-2">
+                                {value ? (
+                                  <CheckCircle className="w-4 h-4 text-green-500" />
+                                ) : (
+                                  <AlertTriangle className="w-4 h-4 text-orange-500" />
+                                )}
+                                <span className="text-sm">
+                                  {key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Credibility Score */}
+                  {result.credibility_score && (
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-semibold">Credibility Analysis</h3>
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span>Overall Score</span>
+                          <span>{result.credibility_score.overall}%</span>
+                        </div>
+                        <Progress 
+                          value={result.credibility_score.overall} 
+                          className="h-2"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        {Object.entries(result.credibility_score.factors).map(([key, value]) => (
+                          <div key={key} className="space-y-1">
+                            <p className="text-sm text-gray-400">
+                              {key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+                            </p>
+                            <Progress value={value as number} className="h-1" />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Real-time Flags */}
+                  {result.real_time_flags && (
+                    <div className="space-y-2">
+                      <h3 className="text-lg font-semibold">Analysis Flags</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {Object.entries(result.real_time_flags).map(([key, value]) => (
+                          value && (
+                            <Badge
+                              key={key}
+                              variant="outline"
+                              className={cn(
+                                "text-sm",
+                                value === true ? "border-orange-500 text-orange-400" : "border-green-500 text-green-400"
+                              )}
+                            >
+                              {key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+                            </Badge>
+                          )
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Suggested Action */}
+                  {result.suggested_action && (
+                    <div className="mt-6 p-4 rounded-lg bg-white/5 border border-white/10">
+                      <p className="text-sm">{result.suggested_action}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Loading State */}
+              {isAnalyzing && (
+                <div className="text-center py-8">
+                  <Loader2 className="w-8 h-8 mx-auto mb-4 animate-spin text-purple-500" />
+                  <p className="text-gray-400">Analyzing your content...</p>
+                </div>
+              )}
+
+              {/* Empty State */}
+              {!result && !isAnalyzing && (
+                <div className="text-center py-8 text-gray-400">
+                  <Brain className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                  <p>Select content and click analyze to see results</p>
                 </div>
               )}
             </CardContent>
