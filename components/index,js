@@ -1,0 +1,48 @@
+import { useState } from 'react';
+
+export default function Home() {
+const [text, setText] = useState('');
+const [result, setResult] = useState(null);
+const [loading, setLoading] = useState(false);
+
+const handleDetect = async () => {
+setLoading(true);
+const response = await fetch('/api/detect', {
+method: 'POST',
+headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify({ text })
+});
+const data = await response.json();
+setResult(data);
+setLoading(false);
+};
+
+return (
+<div style={{ maxWidth: '600px', margin: '2rem auto', padding: '1rem' }}>
+<h1>AI Text Detector</h1>
+<textarea
+value={text}
+onChange={(e) => setText(e.target.value)}
+rows={6}
+placeholder="Paste text here..."
+style={{ width: '100%', padding: '0.5rem' }}
+/>
+<button
+onClick={handleDetect}
+disabled={loading}
+style={{ marginTop: '1rem', padding: '0.5rem 1rem' }}
+>
+{loading ? 'Checking...' : 'Detect AI'}
+</button>
+
+bash
+Copy
+Edit
+  {result && (
+    <pre style={{ marginTop: '1rem', background: '#f1f1f1', padding: '1rem' }}>
+      {JSON.stringify(result, null, 2)}
+    </pre>
+  )}
+</div>
+);
+}
